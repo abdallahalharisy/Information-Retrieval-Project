@@ -1,0 +1,25 @@
+# preprocess.py
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from nltk.stem import PorterStemmer
+
+# ????? ????? ??????? ??? ??? ????? ????? LookupError
+try:
+    nltk.data.find('tokenizers/punkt_tab')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('punkt_tab')
+    nltk.download('stopwords')
+
+# ????? ??????? ??? ????? ???????? ?????? ??????
+stemmer = PorterStemmer()
+stop_words = set(stopwords.words('english'))
+
+
+def clean_and_preprocess(raw_text):
+    if not raw_text:
+        return []
+
+    tokens = word_tokenize(raw_text.lower())
+    return [stemmer.stem(word) for word in tokens if word.isalnum() and word not in stop_words]
