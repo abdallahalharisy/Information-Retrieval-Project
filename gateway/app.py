@@ -1,6 +1,7 @@
 """API Gateway — single entry point for all SOA services."""
 
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ from services.evaluation.router import router as evaluation_router
 from services.retrieval.service import RETRIEVAL_METHODS, retrieve
 from services.ranking.service import RANKING_METHODS, rank
 from services.query_refinement.service import refine_query, suggest
+from shared.engine_registry import warmup_engines
 
 app = FastAPI(
     title="IR Search Engine API Gateway",
@@ -43,6 +45,11 @@ app.include_router(query_refinement_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 
 
+@app.on_event("startup")
+def start_engine_warmup():
+    threading.Thread(target=warmup_engines, daemon=True).start()
+
+
 @app.get("/health")
 def health():
     return {
@@ -53,6 +60,12 @@ def health():
             "ranking", "query_refinement", "evaluation",
         ],
     }
+
+
+@app.post("/api/v1/warmup")
+def warmup():
+    warmup_engines()
+    return {"status": "ready"}
 
 
 @app.get("/api/v1/datasets")

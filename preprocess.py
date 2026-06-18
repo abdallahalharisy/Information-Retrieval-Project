@@ -161,6 +161,15 @@ def refine_query_text(text,
     if not text:
         return ''
 
+    # Fast path for interactive search. POS tagging / spell checking / WordNet
+    # can dominate query latency, while the indexed corpus is already stemmed.
+    if not expand_synonyms and not do_spell_check:
+        text_proc = text.lower().translate(str.maketrans('', '', string.punctuation))
+        tokens = [t for t in text_proc.split() if t.isalpha()]
+        tokens = [t for t in tokens if t not in _STOPWORDS_EN]
+        tokens = [_STEMMER.stem(t) for t in tokens]
+        return apply_history_boost(' '.join(tokens), history_queries)
+
     tokens = preprocess_text(text,
                              lowercase=True,
                              remove_punctuation=True,

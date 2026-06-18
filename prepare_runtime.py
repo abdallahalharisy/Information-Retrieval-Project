@@ -66,8 +66,13 @@ def main():
                 processed_docs = json.load(f)
         engine = RankingEngine()
         engine.fit(processed_docs, fit_word2vec=False, fit_bert=False)
+        print("Saving ranking cache to disk...")
         engine.save_cache(data_file, cache_prefix="msmarco")
-        print("Ranking cache built.")
+        refreshed_meta = read_cache_meta("msmarco")
+        if refreshed_meta.get("cache_exists") and refreshed_meta.get("meta_exists"):
+            print("Ranking cache built.")
+        else:
+            raise RuntimeError("Ranking cache was not written. Check disk space and permissions.")
 
     print("\nRuntime is ready. Daily startup:")
     print("  1) python run_gateway.py")

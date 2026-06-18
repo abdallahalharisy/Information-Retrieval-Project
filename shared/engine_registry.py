@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import threading
 from typing import Dict, Optional
 
 from ranking_engine import RankingEngine
@@ -12,6 +13,7 @@ from shared.document_store import count_documents
 logger = logging.getLogger(__name__)
 
 _engines: Dict[str, RankingEngine] = {}
+_engine_lock = threading.Lock()
 
 
 def _cache_paths(cache_prefix: str) -> tuple:
@@ -49,33 +51,44 @@ def get_loaded_engine(dataset_key: str) -> Optional[RankingEngine]:
 def get_engine(dataset_key: str, build_if_missing: bool = False) -> RankingEngine:
     """Return a fitted engine. By default, never rebuild at runtime."""
     key = resolve_dataset_key(dataset_key)
-    if key in _engines:
-        return _engines[key]
+    with _engine_lock:
+        if key in _engines:
+            return _engines[key]
 
-    cfg = DATASETS[key]
-    data_file = cfg["file"]
-    cache_prefix = cfg["cache_prefix"]
+        cfg = DATASETS[key]
+        data_file = cfg["file"]
+        cache_prefix = cfg["cache_prefix"]
 
-    if not os.path.exists(data_file):
-        raise FileNotFoundError(
-            f"{data_file} not found. Preprocess the dataset first: python main.py {key} 210000"
-        )
-
-    engine = RankingEngine()
-    if not engine.load_cache(data_file, cache_prefix=cache_prefix):
-        if not build_if_missing:
-            raise RuntimeError(
-                f"Index cache is not ready for dataset '{key}'. "
-                "Run once: python prepare_runtime.py"
+        if not os.path.exists(data_file):
+            raise FileNotFoundError(
+                f"{data_file} not found. Preprocess the dataset first: python main.py {key} 210000"
             )
-        logger.info("Building index for %s (%s)...", key, data_file)
-        with open(data_file, encoding="utf-8") as f:
-            documents = json.load(f)
-        engine.fit(documents, fit_word2vec=False, fit_bert=False)
-        engine.save_cache(data_file, cache_prefix=cache_prefix)
 
-    _engines[key] = engine
-    return engine
+        engine = RankingEngine()
+        if not engine.load_cache(data_file, cache_prefix=cache_prefix):
+            if not build_if_missing:
+                raise RuntimeError(
+                    f"Index cache is not ready for dataset '{key}'. "
+                    "Run once: python prepare_runtime.py"
+                )
+            logger.info("Building index for %s (%s)...", key, data_file)
+            with open(data_file, encoding="utf-8") as f:
+                documents = json.load(f)
+            engine.fit(documents, fit_word2vec=False, fit_bert=False)
+            engine.save_cache(data_file, cache_prefix=cache_prefix)
+
+        _engines[key] = engine
+        return engine
+
+
+def warmup_engines() -> None:
+    """Load available engine caches so the first interactive search is fast."""
+    for key in DATASETS:
+        try:
+            get_engine(key, build_if_missing=False)
+            logger.info("Warmup complete for dataset '%s'.", key)
+        except Exception as exc:
+            logger.warning("Warmup skipped for dataset '%s': %s", key, exc)
 
 
 def clear_engine(dataset_key: str) -> None:

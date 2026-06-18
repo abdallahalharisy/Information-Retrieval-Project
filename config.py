@@ -8,15 +8,13 @@ BM25_B = 0.75  # Controls how much effect document length has on relevance
 # ============ Hybrid Fusion Weights ============
 # For parallel fusion: how much each method contributes to final score
 FUSION_WEIGHTS = {
-    'TF-IDF': 0.25,
-    'BM25': 0.25,
-    'Word2Vec': 0.25,
-    'BERT': 0.25,
+    'TF-IDF': 0.5,
+    'BM25': 0.5,
 }
 
 # Serial hybrid applies methods in this order
-SERIAL_FUSION_ORDER = ['TF-IDF', 'BM25', 'Word2Vec', 'BERT']
-RRF_FUSION_ORDER = ['TF-IDF', 'BM25', 'Word2Vec', 'BERT']
+SERIAL_FUSION_ORDER = ['TF-IDF', 'BM25']
+RRF_FUSION_ORDER = ['TF-IDF', 'BM25']
 
 # ============ Embedding Models ============
 EMBEDDING_MODELS = {
@@ -40,8 +38,8 @@ BATCH_SIZE = 32  # Process documents in batches for efficiency
 
 # ============ Query Refinement ============
 QUERY_REFINEMENT = {
-    'expand_synonyms': True,
-    'do_spell_check': True,
+    'expand_synonyms': False,
+    'do_spell_check': False,
     'max_synonyms_per_term': 1,
     'use_search_history': True,
 }

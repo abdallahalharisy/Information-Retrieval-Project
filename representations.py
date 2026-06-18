@@ -51,8 +51,15 @@ class TFIDFRepresentation:
     
     def get_top_k(self, query: str, k: int = 10) -> List[Tuple[str, float]]:
         """Get top-k documents for query"""
-        doc_ids, scores = self.score_query(query)
-        return list(zip(doc_ids[:k], scores[:k]))
+        query_vector = self.vectorizer.transform([query])
+        scores = query_vector.dot(self.tfidf_matrix.T).toarray().ravel()
+        if len(scores) == 0:
+            return []
+
+        k = min(k, len(scores))
+        top_indices = np.argpartition(scores, -k)[-k:]
+        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+        return [(self.doc_ids[i], float(scores[i])) for i in top_indices]
 
 
 class BM25Representation:
@@ -89,8 +96,15 @@ class BM25Representation:
     
     def get_top_k(self, query: str, k: int = 10) -> List[Tuple[str, float]]:
         """Get top-k documents for query"""
-        doc_ids, scores = self.score_query(query)
-        return list(zip(doc_ids[:k], scores[:k]))
+        query_tokens = query.split()
+        scores = self.bm25.get_scores(query_tokens)
+        if len(scores) == 0:
+            return []
+
+        k = min(k, len(scores))
+        top_indices = np.argpartition(scores, -k)[-k:]
+        top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+        return [(self.doc_ids[i], float(scores[i])) for i in top_indices]
     
     def update_parameters(self, k1: float = None, b: float = None):
         """Update BM25 parameters and refit"""

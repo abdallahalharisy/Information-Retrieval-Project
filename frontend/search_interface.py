@@ -118,6 +118,10 @@ def main():
 
     if "search_history" not in st.session_state:
         st.session_state.search_history = []
+    if "last_search_key" not in st.session_state:
+        st.session_state.last_search_key = None
+    if "last_search_response" not in st.session_state:
+        st.session_state.last_search_response = None
 
     st.sidebar.header("Configuration")
 
@@ -135,8 +139,12 @@ def main():
     ranking_method = st.sidebar.selectbox(
         "Ranking Method",
         ["tfidf", "bm25", "index", "word2vec", "bert", "serial", "parallel", "rrf"],
-        index=6,
+        index=1,
     )
+    if ranking_method in ("word2vec", "bert"):
+        st.sidebar.warning("This method can be slow on first use because it builds embeddings.")
+    if ranking_method == "index":
+        st.sidebar.info("Inverted index is built lazily on first use.")
     top_k = st.sidebar.slider("Results", 1, 50, 10)
 
     bm25_k1, bm25_b = 1.5, 0.75
@@ -161,16 +169,30 @@ def main():
 
     if query:
         try:
-            with st.spinner(f"Searching via Gateway ({ranking_method})..."):
-                response = client.search(
-                    query=query,
-                    dataset=dataset_key,
-                    method=ranking_method,
-                    top_k=top_k,
-                    query_history=st.session_state.search_history,
-                    bm25_k1=bm25_k1,
-                    bm25_b=bm25_b,
-                )
+            search_key = (
+                dataset_key,
+                ranking_method,
+                query.strip(),
+                top_k,
+                bm25_k1,
+                bm25_b,
+            )
+
+            if st.session_state.last_search_key != search_key:
+                with st.spinner(f"Searching via Gateway ({ranking_method})..."):
+                    response = client.search(
+                        query=query,
+                        dataset=dataset_key,
+                        method=ranking_method,
+                        top_k=top_k,
+                        query_history=st.session_state.search_history,
+                        bm25_k1=bm25_k1,
+                        bm25_b=bm25_b,
+                    )
+                st.session_state.last_search_key = search_key
+                st.session_state.last_search_response = response
+            else:
+                response = st.session_state.last_search_response
 
             if query.strip() not in st.session_state.search_history:
                 st.session_state.search_history.append(query.strip())

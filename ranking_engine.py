@@ -44,6 +44,7 @@ class RankingEngine:
         self.documents = {}
         self.processed_docs = []
         self.doc_ids = []
+        self._normalized_query_cache = {}
 
         self.serial_fusion = SerialFusion()
         self.parallel_fusion = ParallelFusion(weights=FUSION_WEIGHTS)
@@ -51,7 +52,7 @@ class RankingEngine:
 
         self.cache_dir = 'cache'
         self.cache_prefix = 'default'
-        self.cache_version = 2
+        self.cache_version = 3
         self._set_cache_paths('default')
 
     def _set_cache_paths(self, cache_prefix: str):
@@ -103,12 +104,22 @@ class RankingEngine:
         self.bm25.doc_ids = self.doc_ids
         self.bm25.tokenized_docs = cached['bm25_tokenized_docs']
 
-        self.index.postings = cached['index_postings']
-        self.index.doc_freq = cached['index_doc_freq']
-        self.index.doc_lengths = cached['index_doc_lengths']
-        self.index.num_docs = len(self.doc_ids)
-        self.index.documents = self.processed_docs
-        self.index.doc_ids = self.doc_ids
+        if cached.get('index_cached', False):
+            self.index.postings = cached['index_postings']
+            self.index.doc_freq = cached['index_doc_freq']
+            self.index.doc_lengths = cached['index_doc_lengths']
+            self.index.num_docs = len(self.doc_ids)
+            self.index.documents = self.processed_docs
+            self.index.doc_ids = self.doc_ids
+        else:
+            # The inverted index can be very large for 210K docs, so it is
+            # built lazily only when the user selects the "index" method.
+            self.index.postings = {}
+            self.index.doc_freq = {}
+            self.index.doc_lengths = {}
+            self.index.num_docs = 0
+            self.index.documents = self.processed_docs
+            self.index.doc_ids = self.doc_ids
 
         self.is_fitted = True
 
@@ -126,9 +137,7 @@ class RankingEngine:
                 'bm25_b': self.bm25.b,
                 'bm25_model': self.bm25.bm25,
                 'bm25_tokenized_docs': self.bm25.tokenized_docs,
-                'index_postings': dict(self.index.postings),
-                'index_doc_freq': self.index.doc_freq,
-                'index_doc_lengths': self.index.doc_lengths,
+                'index_cached': False,
             }
             joblib.dump(cached, self.cache_file)
 
@@ -203,6 +212,10 @@ class RankingEngine:
         """Apply preprocessing and query refinement aligned with document indexing."""
         if not query:
             return ''
+        cache_key = (query, tuple(query_history or []))
+        if cache_key in self._normalized_query_cache:
+            return self._normalized_query_cache[cache_key]
+
         history = None
         if query_history and QUERY_REFINEMENT.get('use_search_history', True):
             history = [
@@ -221,7 +234,9 @@ class RankingEngine:
             max_synonyms_per_term=QUERY_REFINEMENT['max_synonyms_per_term'],
             history_queries=history,
         )
-        return refined if refined else query
+        normalized = refined if refined else query
+        self._normalized_query_cache[cache_key] = normalized
+        return normalized
 
     def suggest_queries(self, prefix: str, limit: int = 8) -> List[str]:
         """Suggest query terms from the inverted index vocabulary."""
@@ -279,6 +294,9 @@ class RankingEngine:
         return self.bm25.get_top_k(self._normalize_query(query, query_history), k=top_k)
 
     def rank_index(self, query: str, top_k: int = TOP_K, query_history=None) -> List[Tuple[str, float]]:
+        if self.index.num_docs == 0:
+            logger.info("Lazy building inverted index on first index search...")
+            self.index.fit(self.processed_docs, self.doc_ids)
         return self.index.get_top_k(self._normalize_query(query, query_history), k=top_k)
 
     def rank_word2vec(self, query: str, top_k: int = TOP_K, query_history=None) -> List[Tuple[str, float]]:
