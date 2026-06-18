@@ -24,7 +24,6 @@ GATEWAY_URL = os.environ.get("IR_GATEWAY_URL", "http://127.0.0.1:8000")
 
 DISPLAY_DATASETS = {
     "MSMARCO-Document": "msmarco",
-    "BEIR/Fever": "fever",
 }
 
 

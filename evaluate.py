@@ -6,7 +6,7 @@ import logging
 import os
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Optional, Set
 
 import ir_datasets
 import config
@@ -24,11 +24,9 @@ IR_DATASETS = {
         'ir_name': 'msmarco-document/dev',
         'data_file': 'processed_data_msmarco.json',
         'cache_prefix': 'msmarco',
-    },
-    'fever': {
-        'ir_name': 'beir/fever',
-        'data_file': 'processed_data_fever.json',
-        'cache_prefix': 'fever',
+        'dataset_url': 'https://ir-datasets.com/msmarco-document.html#msmarco-document/dev',
+        'qrels_url': 'https://msmarco.z22.web.core.windows.net/msmarcoranking/msmarco-docdev-qrels.tsv.gz',
+        'queries_url': 'https://msmarco.z22.web.core.windows.net/msmarcoranking/msmarco-docdev-queries.tsv.gz',
     },
 }
 
@@ -170,35 +168,39 @@ def hybrid_embedding_scope(include_embeddings: bool):
         ranking_engine.RRF_FUSION_ORDER[:] = original_rrf
 
 
-def evaluate(dataset_key: str, method: str, k: int = 10, limit: int = 50,
+def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = None,
              mode: str = 'enhanced', include_embeddings: bool = False) -> dict:
     engine = load_engine_for_eval(dataset_key)
     queries, qrels = load_qrels(dataset_key)
 
-    eval_queries = list(queries.items())[:limit]
+    qrels_query_ids = list(qrels.keys())
+    qrels_query_count = len(qrels_query_ids)
+    eval_query_ids = qrels_query_ids if limit is None else qrels_query_ids[:limit]
+
+    print(f"Qrels file query count: {qrels_query_count}")
+    print(f"Queries used for evaluation: {len(eval_query_ids)}")
+    logger.info("Qrels query count: %s", qrels_query_count)
+    logger.info("Evaluation query count: %s", len(eval_query_ids))
+
     metrics = {'P@k': [], 'R@k': [], 'AP': [], f'nDCG@{k}': []}
     per_query = []
 
-    for query_id, query_text in eval_queries:
-        if query_id not in qrels:
+    for query_id in eval_query_ids:
+        query_text = queries.get(query_id)
+        if not query_text:
             continue
 
         relevant = {d for d, r in qrels[query_id].items() if r > 0}
         if not relevant:
             continue
 
-        # Only rank documents present in our processed corpus
-        available_relevant = relevant & set(engine.doc_ids)
-        if not available_relevant:
-            continue
-
         with refinement_mode(mode), hybrid_embedding_scope(include_embeddings):
             results = engine.search(query_text, method=method, top_k=k)
         retrieved = [r['doc_id'] for r in results]
 
-        p = precision_at_k(retrieved, available_relevant, k)
-        r = recall_at_k(retrieved, available_relevant, k)
-        ap = average_precision(retrieved, available_relevant)
+        p = precision_at_k(retrieved, relevant, k)
+        r = recall_at_k(retrieved, relevant, k)
+        ap = average_precision(retrieved, relevant)
         ndcg = ndcg_at_k(retrieved, qrels[query_id], k)
 
         metrics['P@k'].append(p)
@@ -209,7 +211,8 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: int = 50,
             'query_id': query_id,
             'query': query_text,
             'P@k': p, 'R@k': r, 'AP': ap, f'nDCG@{k}': ndcg,
-            'relevant_in_corpus': len(available_relevant),
+            'relevant_total': len(relevant),
+            'relevant_in_corpus': len(relevant & set(engine.doc_ids)),
         })
 
     summary = {
@@ -217,6 +220,8 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: int = 50,
         'method': method,
         'mode': mode,
         'k': k,
+        'qrels_query_count': qrels_query_count,
+        'attempted_query_count': len(eval_query_ids),
         'num_queries': len(per_query),
         'MAP': sum(metrics['AP']) / len(metrics['AP']) if metrics['AP'] else 0.0,
         'avg_P@k': sum(metrics['P@k']) / len(metrics['P@k']) if metrics['P@k'] else 0.0,
@@ -228,7 +233,7 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: int = 50,
 
 
 def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
-                     limit: int = 50, mode: str = 'enhanced',
+                     limit: Optional[int] = None, mode: str = 'enhanced',
                      include_embeddings: bool = False) -> List[dict]:
     results = []
     for method in methods:
@@ -249,6 +254,8 @@ def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
                 'method': method,
                 'mode': mode,
                 'k': k,
+                'qrels_query_count': 0,
+                'attempted_query_count': 0,
                 'num_queries': 0,
                 'MAP': 0.0,
                 'avg_P@k': 0.0,
@@ -261,7 +268,7 @@ def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
 
 
 def compare_baseline_enhanced(dataset_key: str, methods: Iterable[str], k: int = 10,
-                              limit: int = 50, include_embeddings: bool = False) -> dict:
+                              limit: Optional[int] = None, include_embeddings: bool = False) -> dict:
     baseline = evaluate_methods(
         dataset_key,
         methods,
@@ -299,6 +306,17 @@ def compare_baseline_enhanced(dataset_key: str, methods: Iterable[str], k: int =
         'dataset': dataset_key,
         'k': k,
         'limit': limit,
+        'qrels_query_count': max(
+            [item.get('qrels_query_count', 0) for item in [*baseline, *enhanced]],
+            default=0,
+        ),
+        'attempted_query_count': max(
+            [item.get('attempted_query_count', 0) for item in [*baseline, *enhanced]],
+            default=0,
+        ),
+        'dataset_url': IR_DATASETS[dataset_key].get('dataset_url'),
+        'qrels_url': IR_DATASETS[dataset_key].get('qrels_url'),
+        'queries_url': IR_DATASETS[dataset_key].get('queries_url'),
         'created_at': datetime.now().isoformat(timespec='seconds'),
         'methods': list(methods),
         'include_embeddings': include_embeddings,
@@ -320,21 +338,28 @@ def write_markdown_report(report: dict, path: str) -> str:
         '# IR Evaluation Report',
         '',
         f"- Dataset: `{report['dataset']}`",
-        f"- Queries limit: `{report['limit']}`",
+        f"- Dataset page: {report.get('dataset_url')}",
+        f"- Qrels file: {report.get('qrels_url')}",
+        f"- Queries file: {report.get('queries_url')}",
+        f"- Qrels query count: `{report.get('qrels_query_count', 0)}`",
+        f"- Queries used for evaluation: `{report.get('attempted_query_count', 0)}`",
+        f"- Query limit: `{'ALL' if report['limit'] is None else report['limit']}`",
         f"- K: `{k}`",
         f"- Created at: `{report['created_at']}`",
         '',
         '## Summary Table',
         '',
-        f"| Method | Mode | Queries | MAP | Precision@{k} | Recall@{k} | nDCG@{k} |",
-        '|---|---:|---:|---:|---:|---:|---:|',
+        f"| Method | Mode | Qrels Queries | Used Queries | Evaluated Queries | MAP | Precision@{k} | Recall@{k} | nDCG@{k} |",
+        '|---|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
 
     for comparison in report['comparisons']:
         for mode_name in ('baseline', 'enhanced'):
             item = comparison[mode_name]
             lines.append(
-                f"| {comparison['method']} | {mode_name} | {item['num_queries']} | "
+                f"| {comparison['method']} | {mode_name} | "
+                f"{item.get('qrels_query_count', 0)} | {item.get('attempted_query_count', 0)} | "
+                f"{item['num_queries']} | "
                 f"{item['MAP']:.4f} | {item['avg_P@k']:.4f} | "
                 f"{item['avg_R@k']:.4f} | {item[f'avg_nDCG@{k}']:.4f} |"
             )
@@ -361,11 +386,11 @@ def write_markdown_report(report: dict, path: str) -> str:
         '- `baseline`: query normalization without extra synonym expansion, spell correction, or history boosting.',
         '- `enhanced`: query refinement enabled using synonyms, spell correction, and configured history boost.',
         '- Positive deltas indicate that the additional features improved the metric.',
-        '- Very low scores can happen if qrels reference documents outside the currently processed subset.',
+        '- All qrels query IDs are used by default. Very low scores can happen if qrels reference relevant documents outside the currently processed local corpus subset.',
         '',
         '## Notes',
         '',
-        '- FEVER evaluation is intentionally deferred until the FEVER 210K preprocessing is completed.',
+        '- The project currently uses MSMARCO only; FEVER was removed per the updated client requirement.',
         '- BERT/Word2Vec are included only when `include_embeddings=true` or `--include-embeddings` is used.',
     ])
 
@@ -376,7 +401,7 @@ def write_markdown_report(report: dict, path: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description='Evaluate IR engine with qrels')
-    parser.add_argument('dataset', choices=['msmarco', 'fever'])
+    parser.add_argument('dataset', choices=['msmarco'])
     parser.add_argument('--method', default='bm25',
                         choices=['tfidf', 'bm25', 'index', 'word2vec', 'bert', 'serial', 'parallel', 'rrf'])
     parser.add_argument('--methods', nargs='+', default=None,
@@ -389,7 +414,8 @@ def main():
     parser.add_argument('--compare', action='store_true',
                         help='Run baseline and enhanced evaluations and write a comparison report.')
     parser.add_argument('--k', type=int, default=10)
-    parser.add_argument('--limit', type=int, default=50, help='Max queries to evaluate')
+    parser.add_argument('--limit', type=int, default=None,
+                        help='Debug only: max qrels queries to evaluate. Omit to use ALL qrels queries.')
     parser.add_argument('--output', default=None, help='Save JSON report to this path')
     args = parser.parse_args()
 
@@ -414,6 +440,8 @@ def main():
         write_markdown_report(report, md_out)
         print("\n=== Evaluation Comparison ===")
         print(f"Dataset: {args.dataset}")
+        print(f"Qrels queries: {report.get('qrels_query_count', 0)}")
+        print(f"Used queries: {report.get('attempted_query_count', 0)}")
         print(f"Methods: {', '.join(methods)}")
         print(f"JSON report: {json_out}")
         print(f"Markdown report: {md_out}")
@@ -454,6 +482,8 @@ def main():
     print(f"Dataset:     {summary['dataset']}")
     print(f"Method:      {summary['method']}")
     print(f"Mode:        {summary['mode']}")
+    print(f"Qrels queries: {summary['qrels_query_count']}")
+    print(f"Used queries:  {summary['attempted_query_count']}")
     print(f"Queries:     {summary['num_queries']}")
     print(f"P@{args.k}:       {summary['avg_P@k']:.4f}")
     print(f"R@{args.k}:       {summary['avg_R@k']:.4f}")

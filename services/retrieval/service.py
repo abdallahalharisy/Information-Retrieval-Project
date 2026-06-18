@@ -12,7 +12,7 @@ def retrieve(query: str, dataset: str, method: str, top_k: int = 10,
     if method not in RETRIEVAL_METHODS:
         raise ValueError(f"Unknown retrieval method: {method}. Use one of {sorted(RETRIEVAL_METHODS)}")
 
-    engine = get_engine(dataset)
+    engine = get_engine(dataset, build_if_missing=False)
     if bm25_k1 is not None or bm25_b is not None:
         engine.bm25.update_parameters(k1=bm25_k1, b=bm25_b)
 

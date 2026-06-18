@@ -4,23 +4,19 @@ DATASETS = {
     "msmarco": {
         "name": "MSMARCO-Document",
         "file": "processed_data_msmarco.json",
+        "document_db": "data/documents_msmarco.db",
         "cache_prefix": "msmarco",
         "description": "210K+ web documents",
         "ir_name": "msmarco-document/dev",
-    },
-    "fever": {
-        "name": "BEIR/Fever",
-        "file": "processed_data_fever.json",
-        "cache_prefix": "fever",
-        "description": "Fact verification dataset",
-        "ir_name": "beir/fever",
+        "dataset_url": "https://ir-datasets.com/msmarco-document.html#msmarco-document/dev",
+        "qrels_url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/msmarco-docdev-qrels.tsv.gz",
+        "queries_url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/msmarco-docdev-queries.tsv.gz",
     },
 }
 
 DATASET_ALIASES = {
     "MSMARCO-Document": "msmarco",
-    "BEIR/Fever": "fever",
-    "1": "fever",
+    "1": "msmarco",
     "2": "msmarco",
 }
 

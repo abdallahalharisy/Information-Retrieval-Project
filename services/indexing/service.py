@@ -24,18 +24,12 @@ def build_index(dataset_key: str, fit_word2vec: bool = False, fit_bert: bool = F
 
 def get_index_status(dataset_key: str) -> dict:
     key = resolve_dataset_key(dataset_key)
+    status = list_engine_status()[key]
     cfg = DATASETS[key]
-    try:
-        engine = get_engine(key, build_if_missing=False)
-        num_docs = len(engine.doc_ids)
-        ready = True
-    except Exception:
-        num_docs = 0
-        ready = False
     return {
         "dataset": key,
-        "is_ready": ready,
-        "num_documents": num_docs,
+        "is_ready": status["cache_exists"] and status["meta_exists"],
+        "num_documents": status["num_documents"],
         "cache_prefix": cfg["cache_prefix"],
         "data_file": cfg["file"],
     }

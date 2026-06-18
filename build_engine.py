@@ -3,7 +3,6 @@
 Build and cache the ranking engine for a preprocessed dataset (no internet required).
 Usage:
     python build_engine.py msmarco
-    python build_engine.py fever
 """
 
 import json
@@ -14,8 +13,7 @@ from ranking_engine import RankingEngine
 
 DATASETS = {
     'msmarco': ('processed_data_msmarco.json', 'msmarco'),
-    'fever': ('processed_data_fever.json', 'fever'),
-    '1': ('processed_data_fever.json', 'fever'),
+    '1': ('processed_data_msmarco.json', 'msmarco'),
     '2': ('processed_data_msmarco.json', 'msmarco'),
 }
 
@@ -25,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python build_engine.py <msmarco|fever>")
+        print("Usage: python build_engine.py <msmarco>")
         sys.exit(1)
 
     choice = sys.argv[1].lower()

@@ -95,7 +95,7 @@ class EvaluateRequest(BaseModel):
     dataset: str = "msmarco"
     method: str = "bm25"
     k: int = 10
-    limit: int = 50
+    limit: Optional[int] = None
     mode: str = "enhanced"
 
 
@@ -103,7 +103,7 @@ class EvaluateComparisonRequest(BaseModel):
     dataset: str = "msmarco"
     methods: List[str] = Field(default_factory=lambda: ["tfidf", "bm25", "index", "serial", "parallel", "rrf"])
     k: int = 10
-    limit: int = 50
+    limit: Optional[int] = None
     include_embeddings: bool = False
 
 
@@ -112,6 +112,8 @@ class EvaluateSummary(BaseModel):
     method: str
     k: int
     num_queries: int
+    qrels_query_count: int = 0
+    attempted_query_count: int = 0
     avg_precision: float
     avg_recall: float
     map_score: float
@@ -123,7 +125,9 @@ class EvaluateSummary(BaseModel):
 class EvaluateComparisonSummary(BaseModel):
     dataset: str
     k: int
-    limit: int
+    limit: Optional[int] = None
+    qrels_query_count: int = 0
+    attempted_query_count: int = 0
     methods: List[str]
     json_report_path: str
     markdown_report_path: str

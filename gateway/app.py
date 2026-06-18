@@ -111,3 +111,5 @@ def unified_search(request: SearchRequest):
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e

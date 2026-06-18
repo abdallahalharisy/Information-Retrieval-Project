@@ -22,7 +22,7 @@ def _is_network_error(error: Exception) -> bool:
     return any(x in err for x in ("timeout", "connection", "network", "download", "resolve"))
 
 
-def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50,
+def run_eval(dataset: str, method: str, k: int = 10, limit: Optional[int] = None,
              mode: str = "enhanced") -> dict:
     try:
         summary = run_evaluation(dataset, method, k=k, limit=limit, mode=mode)
@@ -44,6 +44,8 @@ def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50,
         "method": summary["method"],
         "k": summary["k"],
         "num_queries": summary["num_queries"],
+        "qrels_query_count": summary["qrels_query_count"],
+        "attempted_query_count": summary["attempted_query_count"],
         "avg_precision": summary["avg_P@k"],
         "avg_recall": summary["avg_R@k"],
         "map_score": summary["MAP"],
@@ -53,7 +55,7 @@ def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50,
     }
 
 
-def run_comparison(dataset: str, methods: list, k: int = 10, limit: int = 50,
+def run_comparison(dataset: str, methods: list, k: int = 10, limit: Optional[int] = None,
                    include_embeddings: bool = False) -> dict:
     selected_methods = list(methods)
     if include_embeddings:
@@ -85,6 +87,8 @@ def run_comparison(dataset: str, methods: list, k: int = 10, limit: int = 50,
         "dataset": report["dataset"],
         "k": report["k"],
         "limit": report["limit"],
+        "qrels_query_count": report["qrels_query_count"],
+        "attempted_query_count": report["attempted_query_count"],
         "methods": report["methods"],
         "json_report_path": json_path,
         "markdown_report_path": markdown_path,

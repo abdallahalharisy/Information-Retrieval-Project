@@ -4,7 +4,7 @@ from typing import List
 
 from config import QUERY_REFINEMENT
 from preprocess import refine_query_text
-from shared.engine_registry import get_engine
+from shared.engine_registry import get_loaded_engine
 
 
 def refine_query(query: str, expand_synonyms: bool = True, do_spell_check: bool = True,
@@ -30,5 +30,7 @@ def refine_query(query: str, expand_synonyms: bool = True, do_spell_check: bool 
 
 
 def suggest(prefix: str, dataset: str, limit: int = 8) -> List[str]:
-    engine = get_engine(dataset)
+    engine = get_loaded_engine(dataset)
+    if engine is None:
+        return []
     return engine.suggest_queries(prefix, limit=limit)

@@ -23,6 +23,8 @@ from hybrid_fusion import (
 )
 from config import FUSION_WEIGHTS, TOP_K, QUERY_REFINEMENT, SERIAL_FUSION_ORDER, RRF_FUSION_ORDER
 from preprocess import refine_query_text
+from shared.datasets import DATASETS
+from shared.document_store import get_document
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -319,11 +321,19 @@ class RankingEngine:
         return self.rrf_fusion.fuse(results, top_k=top_k)
 
     def _build_search_result(self, doc_id: str, score: float, method: str, explanation=None) -> Dict:
+        dataset_cfg = next(
+            (cfg for cfg in DATASETS.values() if cfg["cache_prefix"] == self.cache_prefix),
+            None,
+        )
+        original_text = ""
+        if dataset_cfg and "document_db" in dataset_cfg:
+            original_text = get_document(doc_id, dataset_cfg["document_db"])
+
         result = {
             'doc_id': doc_id,
             'score': float(score),
             'method': method,
-            'document_text': self.documents.get(doc_id, '')
+            'document_text': original_text or self.documents.get(doc_id, '')
         }
         if explanation is not None:
             result['explanation'] = explanation
