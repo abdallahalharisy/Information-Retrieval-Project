@@ -4,19 +4,30 @@ import json
 import os
 from typing import Optional
 
-from evaluate import evaluate as run_evaluation
+from evaluate import (
+    EMBEDDING_METHODS,
+    compare_baseline_enhanced,
+    evaluate as run_evaluation,
+    save_json_report,
+    write_markdown_report,
+)
 
 
 class EvaluationUnavailableError(Exception):
     """Raised when qrels cannot be loaded (e.g. no internet)."""
 
 
-def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50) -> dict:
+def _is_network_error(error: Exception) -> bool:
+    err = str(error).lower()
+    return any(x in err for x in ("timeout", "connection", "network", "download", "resolve"))
+
+
+def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50,
+             mode: str = "enhanced") -> dict:
     try:
-        summary = run_evaluation(dataset, method, k=k, limit=limit)
+        summary = run_evaluation(dataset, method, k=k, limit=limit, mode=mode)
     except Exception as e:
-        err = str(e).lower()
-        if any(x in err for x in ("timeout", "connection", "network", "download", "resolve")):
+        if _is_network_error(e):
             raise EvaluationUnavailableError(
                 "Qrels evaluation requires internet on first run to download queries/qrels. "
                 "Run later when online: python evaluate.py msmarco --method bm25"
@@ -24,7 +35,7 @@ def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50) -> dict:
         raise
 
     os.makedirs("reports", exist_ok=True)
-    report_path = f"reports/eval_{dataset}_{method}_k{k}.json"
+    report_path = f"reports/eval_{dataset}_{method}_{mode}_k{k}.json"
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -39,4 +50,43 @@ def run_eval(dataset: str, method: str, k: int = 10, limit: int = 50) -> dict:
         "avg_ndcg": summary[f"avg_nDCG@{k}"],
         "report_path": report_path,
         "note": None,
+    }
+
+
+def run_comparison(dataset: str, methods: list, k: int = 10, limit: int = 50,
+                   include_embeddings: bool = False) -> dict:
+    selected_methods = list(methods)
+    if include_embeddings:
+        selected_methods = list(dict.fromkeys([*selected_methods, *EMBEDDING_METHODS]))
+
+    try:
+        report = compare_baseline_enhanced(
+            dataset,
+            selected_methods,
+            k=k,
+            limit=limit,
+            include_embeddings=include_embeddings,
+        )
+    except Exception as e:
+        if _is_network_error(e):
+            raise EvaluationUnavailableError(
+                "Qrels evaluation requires internet on first run to download queries/qrels. "
+                "Run later when online: python evaluate.py msmarco --compare --all-methods"
+            ) from e
+        raise
+
+    os.makedirs("reports", exist_ok=True)
+    json_path = f"reports/eval_compare_{dataset}_k{k}.json"
+    markdown_path = f"reports/eval_compare_{dataset}_k{k}.md"
+    save_json_report(report, json_path)
+    write_markdown_report(report, markdown_path)
+
+    return {
+        "dataset": report["dataset"],
+        "k": report["k"],
+        "limit": report["limit"],
+        "methods": report["methods"],
+        "json_report_path": json_path,
+        "markdown_report_path": markdown_path,
+        "comparisons": report["comparisons"],
     }

@@ -8,10 +8,15 @@ BM25_B = 0.75  # Controls how much effect document length has on relevance
 # ============ Hybrid Fusion Weights ============
 # For parallel fusion: how much each method contributes to final score
 FUSION_WEIGHTS = {
-    'tfidf': 0.33,      # TF-IDF weight
-    'bm25': 0.33,       # BM25 weight
-    'embedding': 0.34   # Embedding-based similarity weight
+    'TF-IDF': 0.25,
+    'BM25': 0.25,
+    'Word2Vec': 0.25,
+    'BERT': 0.25,
 }
+
+# Serial hybrid applies methods in this order
+SERIAL_FUSION_ORDER = ['TF-IDF', 'BM25', 'Word2Vec', 'BERT']
+RRF_FUSION_ORDER = ['TF-IDF', 'BM25', 'Word2Vec', 'BERT']
 
 # ============ Embedding Models ============
 EMBEDDING_MODELS = {
@@ -32,6 +37,14 @@ EMBEDDING_MODELS = {
 # ============ Ranking Settings ============
 TOP_K = 10  # Return top-10 results by default
 BATCH_SIZE = 32  # Process documents in batches for efficiency
+
+# ============ Query Refinement ============
+QUERY_REFINEMENT = {
+    'expand_synonyms': True,
+    'do_spell_check': True,
+    'max_synonyms_per_term': 1,
+    'use_search_history': True,
+}
 
 # ============ Serialization ============
 CACHE_DIR = './ir_cache'

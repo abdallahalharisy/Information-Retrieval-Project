@@ -3,6 +3,9 @@
 Document representation methods: TF-IDF, BM25, and Embeddings
 """
 
+import math
+from collections import defaultdict
+
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from rank_bm25 import BM25Okapi
@@ -36,7 +39,8 @@ class TFIDFRepresentation:
     def score_query(self, query: str) -> Tuple[List[str], List[float]]:
         """Score query against all documents"""
         query_vector = self.vectorizer.transform([query])
-        scores = query_vector.dot(self.tfidf_matrix.T).A1
+        scores_matrix = query_vector.dot(self.tfidf_matrix.T)
+        scores = scores_matrix.toarray().ravel()
         
         # Sort by score descending
         ranked_indices = np.argsort(scores)[::-1]
@@ -96,6 +100,69 @@ class BM25Representation:
             self.b = b
         if self.documents:
             self.fit(self.documents, self.doc_ids)
+
+
+class InvertedIndexRepresentation:
+    """Simple inverted index for fast boolean and weighted retrieval."""
+
+    def __init__(self):
+        self.postings = defaultdict(dict)
+        self.doc_freq = {}
+        self.doc_lengths = {}
+        self.num_docs = 0
+        self.documents = []
+        self.doc_ids = []
+
+    def fit(self, documents: List[str], doc_ids: List[str]):
+        """Build the inverted index from preprocessed documents."""
+        self.documents = documents
+        self.doc_ids = doc_ids
+        self.num_docs = len(doc_ids)
+        self.postings = defaultdict(dict)
+        self.doc_lengths = {}
+
+        tokenized_docs = [doc.split() for doc in documents]
+        for doc_id, tokens in zip(doc_ids, tokenized_docs):
+            self.doc_lengths[doc_id] = len(tokens)
+            for token in tokens:
+                self.postings[token][doc_id] = self.postings[token].get(doc_id, 0) + 1
+
+        self.doc_freq = {term: len(docs) for term, docs in self.postings.items()}
+        logger.info(f"Inverted index built on {self.num_docs} documents")
+
+    def score_query(self, query: str) -> Tuple[List[str], List[float]]:
+        """Score documents using term frequency and IDF from the inverted index."""
+        query_terms = query.split()
+        if not query_terms:
+            return self.doc_ids, [0.0] * len(self.doc_ids)
+
+        scores = defaultdict(float)
+        for term in query_terms:
+            postings = self.postings.get(term, {})
+            if not postings:
+                continue
+            idf = math.log((self.num_docs + 1) / (len(postings) + 1)) + 1.0
+            for doc_id, tf in postings.items():
+                scores[doc_id] += (1.0 + math.log(tf)) * idf
+
+        if not scores:
+            return self.doc_ids, [0.0] * len(self.doc_ids)
+
+        # Normalize by document length to reduce bias toward long documents
+        scored_items = [
+            (doc_id, score / (self.doc_lengths.get(doc_id, 1) + 1.0))
+            for doc_id, score in scores.items()
+        ]
+        scored_items.sort(key=lambda x: x[1], reverse=True)
+
+        ranked_docs = [doc_id for doc_id, _ in scored_items]
+        ranked_scores = [float(score) for _, score in scored_items]
+        return ranked_docs, ranked_scores
+
+    def get_top_k(self, query: str, k: int = 10) -> List[Tuple[str, float]]:
+        """Return the top-k documents for the query."""
+        doc_ids, scores = self.score_query(query)
+        return list(zip(doc_ids[:k], scores[:k]))
 
 
 class EmbeddingRepresentation:

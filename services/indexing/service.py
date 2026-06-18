@@ -1,0 +1,45 @@
+"""Indexing service business logic."""
+
+from shared.datasets import DATASETS, resolve_dataset_key
+from shared.engine_registry import clear_engine, get_engine, list_engine_status
+
+
+def build_index(dataset_key: str, fit_word2vec: bool = False, fit_bert: bool = False) -> dict:
+    key = resolve_dataset_key(dataset_key)
+    clear_engine(key)
+    engine = get_engine(key, build_if_missing=True)
+    if fit_word2vec and engine.word2vec.model is None:
+        engine.word2vec.fit(engine.processed_docs, engine.doc_ids)
+    if fit_bert and engine.bert.model is None:
+        engine.bert.fit(engine.processed_docs, engine.doc_ids)
+    cfg = DATASETS[key]
+    return {
+        "dataset": key,
+        "is_ready": engine.is_fitted,
+        "num_documents": len(engine.doc_ids),
+        "cache_prefix": cfg["cache_prefix"],
+        "data_file": cfg["file"],
+    }
+
+
+def get_index_status(dataset_key: str) -> dict:
+    key = resolve_dataset_key(dataset_key)
+    cfg = DATASETS[key]
+    try:
+        engine = get_engine(key, build_if_missing=False)
+        num_docs = len(engine.doc_ids)
+        ready = True
+    except Exception:
+        num_docs = 0
+        ready = False
+    return {
+        "dataset": key,
+        "is_ready": ready,
+        "num_documents": num_docs,
+        "cache_prefix": cfg["cache_prefix"],
+        "data_file": cfg["file"],
+    }
+
+
+def get_all_status() -> dict:
+    return list_engine_status()

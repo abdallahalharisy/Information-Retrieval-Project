@@ -70,9 +70,13 @@ class SerialFusion(FusionStrategy):
         # Return top-k with explanation
         final_results = []
         for doc_id, score in sorted_results[:top_k]:
+            method_scores = {}
+            for result in results:
+                method_scores[result.method] = dict(zip(result.doc_ids, result.scores)).get(doc_id, 0.0)
             explanation = {
                 'fusion_type': 'serial',
-                'methods': [r.method for r in results],
+                'methods': method_scores,
+                'pipeline': [r.method for r in results],
                 'combined_score': score
             }
             final_results.append((doc_id, score, explanation))
@@ -188,11 +192,18 @@ class RRFFusion(FusionStrategy):
         # Return top-k with explanation
         final_results = []
         for doc_id, rrf_score in sorted_results[:top_k]:
+            method_scores = {}
+            for result in results:
+                rank_map = {d: i + 1 for i, d in enumerate(result.doc_ids)}
+                if doc_id in rank_map:
+                    method_scores[result.method] = 1.0 / (k + rank_map[doc_id])
+                else:
+                    method_scores[result.method] = 0.0
             explanation = {
                 'fusion_type': 'rrf',
-                'methods': [r.method for r in results],
+                'methods': method_scores,
                 'rrf_score': rrf_score,
-                'rrf_k': k
+                'rrf_k': k,
             }
             final_results.append((doc_id, rrf_score, explanation))
         

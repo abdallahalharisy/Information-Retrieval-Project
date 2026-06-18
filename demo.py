@@ -1,79 +1,47 @@
 # demo.py
-"""
-Demo script: Load processed data, fit ranking engine, and run sample queries
-"""
+"""Demo script: load MSMARCO, fit engine, run sample queries."""
 
 import json
 import logging
 from ranking_engine import RankingEngine
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+DATA_FILE = 'processed_data_msmarco.json'
+CACHE_PREFIX = 'msmarco'
 
 
 def main():
-    logger.info("=== IR Search Engine Demo ===\n")
-    
-    # 1. Load preprocessed documents
-    logger.info("Step 1: Loading preprocessed documents...")
-    try:
-        with open('processed_data.json', 'r', encoding='utf-8') as f:
-            processed_documents = json.load(f)
-        logger.info(f"Loaded {len(processed_documents)} preprocessed documents\n")
-    except FileNotFoundError:
-        logger.error("processed_data.json not found. Run main.py first.")
-        return
-    
-    # 2. Initialize and fit ranking engine
-    logger.info("Step 2: Initializing and fitting ranking engine...")
+    logger.info("=== IR Search Engine Demo ===")
+
+    with open(DATA_FILE, encoding='utf-8') as f:
+        processed_documents = json.load(f)
+    logger.info(f"Loaded {len(processed_documents):,} documents")
+
     engine = RankingEngine()
-    engine.fit(processed_documents)
-    logger.info()
-    
-    # 3. Print parameter report
-    logger.info("Step 3: Current parameters:")
+    if not engine.load_cache(DATA_FILE, cache_prefix=CACHE_PREFIX):
+        engine.fit(processed_documents, fit_word2vec=False, fit_bert=False)
+        engine.save_cache(DATA_FILE, cache_prefix=CACHE_PREFIX)
+
     report = engine.get_parameter_report()
-    for key, value in report.items():
-        logger.info(f"  {key}: {value}")
-    logger.info()
-    
-    # 4. Run sample queries
+    logger.info(f"Engine ready: {report['num_documents']:,} docs")
+
     sample_queries = [
         "information retrieval search engine",
         "machine learning algorithms",
-        "natural language processing"
+        "natural language processing",
     ]
-    
-    logger.info("Step 4: Running sample queries...\n")
-    
+
     for query in sample_queries:
-        logger.info(f"{'='*60}")
-        logger.info(f"Query: {query}")
-        logger.info(f"{'='*60}")
-        
-        # Try different ranking methods
-        methods = ['tfidf', 'bm25', 'parallel', 'serial', 'rrf']
-        
-        for method in methods:
-            try:
-                logger.info(f"\n  Method: {method.upper()}")
-                results = engine.search(query, method=method, top_k=5)
-                
-                for i, result in enumerate(results, 1):
-                    doc_id = result['doc_id']
-                    score = result['score']
-                    logger.info(f"    {i}. {doc_id}: {score:.4f}")
-                    
-                    if 'explanation' in result:
-                        exp = result['explanation']
-                        logger.info(f"       Fusion: {exp.get('fusion_type', 'N/A')}")
-                
-            except Exception as e:
-                logger.warning(f"  {method.upper()} failed: {e}")
-        
-        logger.info()
-    
-    logger.info("=== Demo Complete ===")
+        logger.info(f"\n{'=' * 60}\nQuery: {query}\n{'=' * 60}")
+        for method in ['tfidf', 'bm25', 'serial', 'parallel', 'rrf']:
+            results = engine.search(query, method=method, top_k=3)
+            logger.info(f"  {method.upper()}:")
+            for i, r in enumerate(results, 1):
+                logger.info(f"    {i}. {r['doc_id']}: {r['score']:.4f}")
+
+    logger.info("\n=== Demo Complete ===")
 
 
 if __name__ == '__main__':
