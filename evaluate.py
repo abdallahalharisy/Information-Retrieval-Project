@@ -1,6 +1,7 @@
 # evaluate.py
 import argparse
 import contextlib
+import copy
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import ir_datasets
 import config
 import ranking_engine
 from ranking_engine import RankingEngine
+from shared.engine_registry import get_engine
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -32,20 +34,7 @@ IR_DATASETS = {
 
 
 def load_engine_for_eval(dataset_key: str) -> RankingEngine:
-    cfg = IR_DATASETS[dataset_key]
-    data_file = cfg['data_file']
-    if not os.path.exists(data_file):
-        raise FileNotFoundError(f"{data_file} not found. Run: python main.py {dataset_key} 210000")
-
-    with open(data_file, encoding='utf-8') as f:
-        documents = json.load(f)
-
-    engine = RankingEngine()
-    if not engine.load_cache(data_file, cache_prefix=cfg['cache_prefix']):
-        logger.info("Building engine cache...")
-        engine.fit(documents, fit_word2vec=False, fit_bert=False)
-        engine.save_cache(data_file, cache_prefix=cfg['cache_prefix'])
-    return engine
+    return get_engine(dataset_key, build_if_missing=False)
 
 
 def load_qrels(dataset_key: str) -> tuple:
@@ -90,7 +79,7 @@ def average_precision(retrieved: List[str], relevant: Set[str]) -> float:
 def ndcg_at_k(retrieved: List[str], relevant: Dict[str, int], k: int) -> float:
     import math
 
-    def dcg(ranking, rels, n):
+    def compute_dcg(ranking, rels, n):
         value = 0.0
         for i, doc_id in enumerate(ranking[:n], 1):
             rel = rels.get(doc_id, 0)
@@ -99,9 +88,9 @@ def ndcg_at_k(retrieved: List[str], relevant: Dict[str, int], k: int) -> float:
 
     ideal = sorted(relevant.items(), key=lambda x: x[1], reverse=True)
     ideal_ids = [doc_id for doc_id, _ in ideal]
-    dcg = dcg(retrieved, relevant, k)
-    idcg = dcg(ideal_ids, relevant, k)
-    return dcg / idcg if idcg > 0 else 0.0
+    dcg_value = compute_dcg(retrieved, relevant, k)
+    idcg = compute_dcg(ideal_ids, relevant, k)
+    return dcg_value / idcg if idcg > 0 else 0.0
 
 
 @contextlib.contextmanager
@@ -116,8 +105,8 @@ def refinement_mode(mode: str):
         })
     elif mode == 'enhanced':
         config.QUERY_REFINEMENT.update({
-            'expand_synonyms': True,
-            'do_spell_check': True,
+            'expand_synonyms': config.QUERY_REFINEMENT.get('expand_synonyms', False),
+            'do_spell_check': config.QUERY_REFINEMENT.get('do_spell_check', False),
             'use_search_history': True,
         })
     else:
@@ -169,9 +158,12 @@ def hybrid_embedding_scope(include_embeddings: bool):
 
 
 def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = None,
-             mode: str = 'enhanced', include_embeddings: bool = False) -> dict:
-    engine = load_engine_for_eval(dataset_key)
-    queries, qrels = load_qrels(dataset_key)
+             mode: str = 'enhanced', include_embeddings: bool = False,
+             engine: Optional[RankingEngine] = None, queries: Optional[Dict[str, str]] = None,
+             qrels: Optional[Dict[str, Dict[str, int]]] = None) -> dict:
+    engine = engine or load_engine_for_eval(dataset_key)
+    if queries is None or qrels is None:
+        queries, qrels = load_qrels(dataset_key)
 
     qrels_query_ids = list(qrels.keys())
     qrels_query_count = len(qrels_query_ids)
@@ -184,6 +176,7 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = 
 
     metrics = {'P@k': [], 'R@k': [], 'AP': [], f'nDCG@{k}': []}
     per_query = []
+    corpus_doc_ids = set(engine.doc_ids)
 
     for query_id in eval_query_ids:
         query_text = queries.get(query_id)
@@ -195,7 +188,12 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = 
             continue
 
         with refinement_mode(mode), hybrid_embedding_scope(include_embeddings):
-            results = engine.search(query_text, method=method, top_k=k)
+            results = engine.search(
+                query_text,
+                method=method,
+                top_k=k,
+                include_document_text=False,
+            )
         retrieved = [r['doc_id'] for r in results]
 
         p = precision_at_k(retrieved, relevant, k)
@@ -212,7 +210,7 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = 
             'query': query_text,
             'P@k': p, 'R@k': r, 'AP': ap, f'nDCG@{k}': ndcg,
             'relevant_total': len(relevant),
-            'relevant_in_corpus': len(relevant & set(engine.doc_ids)),
+            'relevant_in_corpus': len(relevant & corpus_doc_ids),
         })
 
     summary = {
@@ -234,8 +232,14 @@ def evaluate(dataset_key: str, method: str, k: int = 10, limit: Optional[int] = 
 
 def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
                      limit: Optional[int] = None, mode: str = 'enhanced',
-                     include_embeddings: bool = False) -> List[dict]:
+                     include_embeddings: bool = False,
+                     engine: Optional[RankingEngine] = None,
+                     queries: Optional[Dict[str, str]] = None,
+                     qrels: Optional[Dict[str, Dict[str, int]]] = None) -> List[dict]:
     results = []
+    engine = engine or load_engine_for_eval(dataset_key)
+    if queries is None or qrels is None:
+        queries, qrels = load_qrels(dataset_key)
     for method in methods:
         logger.info("Evaluating %s/%s (%s)", dataset_key, method, mode)
         try:
@@ -246,6 +250,9 @@ def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
                 limit=limit,
                 mode=mode,
                 include_embeddings=include_embeddings,
+                engine=engine,
+                queries=queries,
+                qrels=qrels,
             ))
         except Exception as e:
             logger.warning("Evaluation failed for %s/%s/%s: %s", dataset_key, method, mode, e)
@@ -269,6 +276,9 @@ def evaluate_methods(dataset_key: str, methods: Iterable[str], k: int = 10,
 
 def compare_baseline_enhanced(dataset_key: str, methods: Iterable[str], k: int = 10,
                               limit: Optional[int] = None, include_embeddings: bool = False) -> dict:
+    engine = load_engine_for_eval(dataset_key)
+    queries, qrels = load_qrels(dataset_key)
+    methods = list(dict.fromkeys(methods))
     baseline = evaluate_methods(
         dataset_key,
         methods,
@@ -276,15 +286,26 @@ def compare_baseline_enhanced(dataset_key: str, methods: Iterable[str], k: int =
         limit=limit,
         mode='baseline',
         include_embeddings=include_embeddings,
+        engine=engine,
+        queries=queries,
+        qrels=qrels,
     )
-    enhanced = evaluate_methods(
-        dataset_key,
-        methods,
-        k=k,
-        limit=limit,
-        mode='enhanced',
-        include_embeddings=include_embeddings,
-    )
+    if not config.QUERY_REFINEMENT.get('expand_synonyms') and not config.QUERY_REFINEMENT.get('do_spell_check'):
+        enhanced = copy.deepcopy(baseline)
+        for item in enhanced:
+            item['mode'] = 'enhanced'
+    else:
+        enhanced = evaluate_methods(
+            dataset_key,
+            methods,
+            k=k,
+            limit=limit,
+            mode='enhanced',
+            include_embeddings=include_embeddings,
+            engine=engine,
+            queries=queries,
+            qrels=qrels,
+        )
 
     enhanced_by_method = {item['method']: item for item in enhanced}
     comparisons = []
@@ -318,7 +339,7 @@ def compare_baseline_enhanced(dataset_key: str, methods: Iterable[str], k: int =
         'qrels_url': IR_DATASETS[dataset_key].get('qrels_url'),
         'queries_url': IR_DATASETS[dataset_key].get('queries_url'),
         'created_at': datetime.now().isoformat(timespec='seconds'),
-        'methods': list(methods),
+        'methods': methods,
         'include_embeddings': include_embeddings,
         'comparisons': comparisons,
     }

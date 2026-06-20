@@ -17,6 +17,20 @@ class EvaluationUnavailableError(Exception):
     """Raised when qrels cannot be loaded (e.g. no internet)."""
 
 
+def _compact_comparisons(comparisons: list) -> list:
+    """Keep the API response small; full per-query details stay in report files."""
+    compacted = []
+    for comparison in comparisons:
+        item = dict(comparison)
+        for mode in ("baseline", "enhanced"):
+            if mode in item:
+                summary = dict(item[mode])
+                summary.pop("per_query", None)
+                item[mode] = summary
+        compacted.append(item)
+    return compacted
+
+
 def _is_network_error(error: Exception) -> bool:
     err = str(error).lower()
     return any(x in err for x in ("timeout", "connection", "network", "download", "resolve"))
@@ -57,7 +71,7 @@ def run_eval(dataset: str, method: str, k: int = 10, limit: Optional[int] = None
 
 def run_comparison(dataset: str, methods: list, k: int = 10, limit: Optional[int] = None,
                    include_embeddings: bool = False) -> dict:
-    selected_methods = list(methods)
+    selected_methods = list(dict.fromkeys(methods))
     if include_embeddings:
         selected_methods = list(dict.fromkeys([*selected_methods, *EMBEDDING_METHODS]))
 
@@ -92,5 +106,5 @@ def run_comparison(dataset: str, methods: list, k: int = 10, limit: Optional[int
         "methods": report["methods"],
         "json_report_path": json_path,
         "markdown_report_path": markdown_path,
-        "comparisons": report["comparisons"],
+        "comparisons": _compact_comparisons(report["comparisons"]),
     }

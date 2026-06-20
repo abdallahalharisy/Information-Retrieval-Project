@@ -3,7 +3,7 @@
 import os
 import sqlite3
 from contextlib import contextmanager
-from typing import Iterable, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 DEFAULT_DB_PATH = os.path.join("data", "documents_msmarco.db")
 
@@ -56,6 +56,24 @@ def get_document(doc_id: str, db_path: str = DEFAULT_DB_PATH) -> str:
             (doc_id,),
         ).fetchone()
     return row[0] if row else ""
+
+
+def get_documents(doc_ids: List[str], db_path: str = DEFAULT_DB_PATH) -> Dict[str, str]:
+    """Return original text for many document ids using one SQLite connection."""
+    if not doc_ids or not os.path.exists(db_path):
+        return {}
+
+    results: Dict[str, str] = {}
+    with sqlite3.connect(db_path) as conn:
+        for start in range(0, len(doc_ids), 900):
+            batch = doc_ids[start:start + 900]
+            placeholders = ",".join("?" for _ in batch)
+            rows = conn.execute(
+                f"SELECT doc_id, raw_text FROM documents WHERE doc_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+            results.update({doc_id: raw_text for doc_id, raw_text in rows})
+    return results
 
 
 def count_documents(db_path: str = DEFAULT_DB_PATH) -> int:

@@ -26,52 +26,69 @@ def _extract_document_text(doc):
     return raw_text or ""
 
 
-def load_dataset(dataset_name, limit=210000, document_db=None):
+def _parse_limit(value):
+    if value is None:
+        return None
+    parsed = int(value)
+    return None if parsed <= 0 else parsed
+
+
+def preprocess_dataset_to_json(dataset_name, output_filename, limit=None, document_db=None):
     """
-    Load and preprocess a dataset from ir_datasets
+    Load and preprocess a dataset from ir_datasets, streaming output to JSON.
     
     Args:
         dataset_name: name of the dataset (e.g., 'msmarco-document/dev')
-        limit: maximum number of documents to process
+        output_filename: JSON output path
+        limit: maximum number of documents to process; None means all documents
     """
     print(f"Connecting to dataset {dataset_name}...")
     dataset = ir_datasets.load(dataset_name)
     
-    processed_corpus = {}
     raw_batch = []
     batch_size = 1000
     if document_db:
         init_document_store(document_db)
         print(f"Original documents will be stored in SQLite: {document_db}")
 
-    print(f"Starting preprocessing for the first {limit} documents...")
+    scope = "all documents" if limit is None else f"the first {limit} documents"
+    print(f"Starting preprocessing for {scope}...")
     
-    # Main loop to read and clean data
-    for i, doc in enumerate(dataset.docs_iter()):
-        if i >= limit:
-            break
-            
-        doc_id = doc.doc_id
-        
-        raw_text = _extract_document_text(doc)
-        
-        # Apply the preprocessing function
-        if raw_text:
-            processed_corpus[doc_id] = clean_and_preprocess(raw_text)
-            if document_db:
-                raw_batch.append((doc_id, raw_text))
-                if len(raw_batch) >= batch_size:
-                    upsert_documents(raw_batch, document_db)
-                    raw_batch = []
-            
-            # Print progress every 500 documents
-            if (i + 1) % 500 == 0:
-                print(f"Processed {i + 1} documents...")
+    processed_count = 0
+    with open(output_filename, "w", encoding="utf-8") as f:
+        f.write("{\n")
+        first_item = True
+        for i, doc in enumerate(dataset.docs_iter()):
+            if limit is not None and i >= limit:
+                break
+
+            doc_id = doc.doc_id
+            raw_text = _extract_document_text(doc)
+
+            if raw_text:
+                tokens = clean_and_preprocess(raw_text)
+                if not first_item:
+                    f.write(",\n")
+                json.dump(doc_id, f, ensure_ascii=False)
+                f.write(": ")
+                json.dump(tokens, f, ensure_ascii=False)
+                first_item = False
+                processed_count += 1
+
+                if document_db:
+                    raw_batch.append((doc_id, raw_text))
+                    if len(raw_batch) >= batch_size:
+                        upsert_documents(raw_batch, document_db)
+                        raw_batch = []
+
+                if processed_count % 500 == 0:
+                    print(f"Processed {processed_count} documents...")
+        f.write("\n}\n")
 
     if document_db and raw_batch:
         upsert_documents(raw_batch, document_db)
     
-    return processed_corpus
+    return processed_count
 
 def main():
     if len(sys.argv) < 2:
@@ -79,11 +96,13 @@ def main():
         print("\nAvailable datasets:")
         print("  1 or msmarco   -> MSMARCO-Document (3.2M docs)")
         print("\nExamples:")
+        print("  python main.py msmarco       # all documents")
+        print("  python main.py msmarco 0     # all documents")
         print("  python main.py msmarco 210000")
         sys.exit(1)
     
     dataset_choice = sys.argv[1].lower()
-    limit = int(sys.argv[2]) if len(sys.argv) > 2 else 200000
+    limit = _parse_limit(sys.argv[2]) if len(sys.argv) > 2 else None
     
     datasets = {
         "1": ("msmarco-document/dev", "msmarco"),
@@ -99,18 +118,19 @@ def main():
     dataset_name, output_prefix = datasets[dataset_choice]
     document_db = DATASETS[output_prefix]["document_db"]
     
-    # Load and process the dataset
-    processed_corpus = load_dataset(dataset_name, limit, document_db=document_db)
-    
     # Save processed data to a local file
     output_filename = f"processed_data_{output_prefix}.json"
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(processed_corpus, f, ensure_ascii=False, indent=4)
+    processed_count = preprocess_dataset_to_json(
+        dataset_name,
+        output_filename,
+        limit=limit,
+        document_db=document_db,
+    )
     
     print("\n==============================================")
     print(f"Processing complete!")
     print(f"Dataset: {dataset_name}")
-    print(f"Documents processed: {len(processed_corpus)}")
+    print(f"Documents processed: {processed_count}")
     print(f"Output file: {output_filename}")
     print(f"Original documents DB: {document_db}")
     print("==============================================")

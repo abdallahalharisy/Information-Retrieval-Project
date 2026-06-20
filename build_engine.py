@@ -5,11 +5,11 @@ Usage:
     python build_engine.py msmarco
 """
 
-import json
 import logging
 import sys
 
 from ranking_engine import RankingEngine
+from shared.engine_registry import _load_processed_texts
 
 DATASETS = {
     'msmarco': ('processed_data_msmarco.json', 'msmarco'),
@@ -32,18 +32,17 @@ def main():
         sys.exit(1)
 
     data_file, cache_prefix = DATASETS[choice]
-    logger.info(f"Loading {data_file}...")
-    with open(data_file, encoding='utf-8') as f:
-        documents = json.load(f)
-    logger.info(f"Loaded {len(documents):,} documents")
-
     engine = RankingEngine()
     if engine.load_cache(data_file, cache_prefix=cache_prefix):
         logger.info(f"Cache already up to date for '{cache_prefix}' ({len(engine.doc_ids):,} docs)")
         return
 
-    logger.info("Building TF-IDF, BM25, and inverted index (this may take several minutes)...")
-    engine.fit(documents, fit_word2vec=False, fit_bert=False)
+    logger.info(f"Streaming {data_file}...")
+    doc_ids, processed_docs = _load_processed_texts(data_file)
+    logger.info(f"Loaded {len(doc_ids):,} documents")
+
+    logger.info("Building TF-IDF and BM25 cache (this may take a while for full MSMARCO)...")
+    engine.fit_processed_texts(processed_docs, doc_ids, fit_word2vec=False, fit_bert=False)
     engine.save_cache(data_file, cache_prefix=cache_prefix)
     logger.info(f"Done. Cache saved to cache/engine_cache_{cache_prefix}.joblib")
 

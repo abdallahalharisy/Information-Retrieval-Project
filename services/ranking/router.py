@@ -31,9 +31,10 @@ def hybrid_rrf(request: SearchRequest):
 
 @router.post("/search", response_model=SearchResponse)
 def hybrid_search(request: SearchRequest):
-    if request.method not in RANKING_METHODS:
+    method = request.resolved_method()
+    if method not in RANKING_METHODS:
         raise HTTPException(status_code=400, detail=f"Hybrid method required: {sorted(RANKING_METHODS)}")
-    return _hybrid_search(request, request.method)
+    return _hybrid_search(request, method)
 
 
 def _hybrid_search(request: SearchRequest, method: str) -> SearchResponse:
@@ -52,6 +53,9 @@ def _hybrid_search(request: SearchRequest, method: str) -> SearchResponse:
             query=request.query,
             refined_query=refined["refined"],
             method=method,
+            search_method=request.search_method,
+            ranking_method=request.ranking_method,
+            execution_mode=request.execution_mode,
             dataset=request.dataset,
             results=[SearchResultItem(**r) for r in results],
         )

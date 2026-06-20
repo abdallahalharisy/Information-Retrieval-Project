@@ -19,6 +19,7 @@ from services.retrieval.router import router as retrieval_router
 from services.ranking.router import router as ranking_router
 from services.query_refinement.router import router as query_refinement_router
 from services.evaluation.router import router as evaluation_router
+from services.rag.router import router as rag_router
 from services.retrieval.service import RETRIEVAL_METHODS, retrieve
 from services.ranking.service import RANKING_METHODS, rank
 from services.query_refinement.service import refine_query, suggest
@@ -43,6 +44,7 @@ app.include_router(retrieval_router, prefix="/api/v1")
 app.include_router(ranking_router, prefix="/api/v1")
 app.include_router(query_refinement_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
+app.include_router(rag_router, prefix="/api/v1")
 
 
 @app.on_event("startup")
@@ -57,7 +59,7 @@ def health():
         "gateway": "running",
         "services": [
             "preprocessing", "indexing", "retrieval",
-            "ranking", "query_refinement", "evaluation",
+            "ranking", "query_refinement", "evaluation", "rag",
         ],
     }
 
@@ -86,7 +88,12 @@ def unified_search(request: SearchRequest):
     Orchestrated search: Query Refinement → Retrieval or Ranking.
     """
     try:
-        refined = refine_query(request.query, query_history=request.query_history)
+        refined = refine_query(
+            request.query,
+            expand_synonyms=False,
+            do_spell_check=False,
+            query_history=request.query_history,
+        )
         suggestions = []
         if len(request.query.strip()) >= 2:
             try:
@@ -94,22 +101,23 @@ def unified_search(request: SearchRequest):
             except Exception:
                 pass
 
-        if request.method in RETRIEVAL_METHODS:
+        method = request.resolved_method()
+        if method in RETRIEVAL_METHODS:
             results = retrieve(
-                request.query, request.dataset, request.method,
+                request.query, request.dataset, method,
                 request.top_k, request.query_history,
                 request.bm25_k1, request.bm25_b,
             )
-        elif request.method in RANKING_METHODS:
+        elif method in RANKING_METHODS:
             results = rank(
-                request.query, request.dataset, request.method,
+                request.query, request.dataset, method,
                 request.top_k, request.query_history,
                 request.bm25_k1, request.bm25_b,
             )
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown method '{request.method}'. "
+                detail=f"Unknown method '{method}'. "
                        f"Retrieval: {sorted(RETRIEVAL_METHODS)} | "
                        f"Ranking: {sorted(RANKING_METHODS)}",
             )
@@ -117,7 +125,10 @@ def unified_search(request: SearchRequest):
         return SearchResponse(
             query=request.query,
             refined_query=refined["refined"],
-            method=request.method,
+            method=method,
+            search_method=request.search_method,
+            ranking_method=request.ranking_method,
+            execution_mode=request.execution_mode,
             dataset=request.dataset,
             results=[SearchResultItem(**r) for r in results],
             suggestions=suggestions,

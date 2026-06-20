@@ -5,6 +5,8 @@ __pycache__/
 *.json
 *.joblib
 *.db
+*.old
+
 data/
 # C extensions
 *.so

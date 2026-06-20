@@ -6,7 +6,7 @@ DATASETS = {
         "file": "processed_data_msmarco.json",
         "document_db": "data/documents_msmarco.db",
         "cache_prefix": "msmarco",
-        "description": "210K+ web documents",
+        "description": "MSMARCO web documents",
         "ir_name": "msmarco-document/dev",
         "dataset_url": "https://ir-datasets.com/msmarco-document.html#msmarco-document/dev",
         "qrels_url": "https://msmarco.z22.web.core.windows.net/msmarcoranking/msmarco-docdev-qrels.tsv.gz",

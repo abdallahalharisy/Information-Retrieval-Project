@@ -16,7 +16,8 @@ def health():
 
 @router.post("/search", response_model=SearchResponse)
 def search(request: SearchRequest):
-    if request.method not in RETRIEVAL_METHODS:
+    method = request.resolved_method()
+    if method not in RETRIEVAL_METHODS:
         raise HTTPException(
             status_code=400,
             detail=f"Use ranking service for hybrid methods. Allowed: {sorted(RETRIEVAL_METHODS)}",
@@ -29,7 +30,7 @@ def search(request: SearchRequest):
         results = retrieve(
             request.query,
             request.dataset,
-            request.method,
+            method,
             request.top_k,
             request.query_history,
             request.bm25_k1,
@@ -38,7 +39,10 @@ def search(request: SearchRequest):
         return SearchResponse(
             query=request.query,
             refined_query=refined["refined"],
-            method=request.method,
+            method=method,
+            search_method=request.search_method,
+            ranking_method=request.ranking_method,
+            execution_mode=request.execution_mode,
             dataset=request.dataset,
             results=[SearchResultItem(**r) for r in results],
         )

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import threading
-from typing import Dict, Optional
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from ranking_engine import RankingEngine
 from shared.datasets import DATASETS, resolve_dataset_key
@@ -14,6 +14,106 @@ logger = logging.getLogger(__name__)
 
 _engines: Dict[str, RankingEngine] = {}
 _engine_lock = threading.Lock()
+
+
+def _stream_processed_items(path: str, chunk_size: int = 1024 * 1024) -> Iterator[Tuple[str, str]]:
+    """Stream the huge processed JSON object without loading it all at once."""
+    decoder = json.JSONDecoder()
+    buffer = ""
+    pos = 0
+
+    with open(path, encoding="utf-8") as f:
+        eof = False
+
+        def fill() -> None:
+            nonlocal buffer, eof
+            chunk = f.read(chunk_size)
+            if chunk:
+                buffer += chunk
+            else:
+                eof = True
+
+        fill()
+        while True:
+            while True:
+                while pos < len(buffer) and buffer[pos].isspace():
+                    pos += 1
+                if pos < len(buffer):
+                    break
+                if eof:
+                    return
+                buffer = ""
+                pos = 0
+                fill()
+
+            if buffer[pos] == "{":
+                pos += 1
+                break
+            raise ValueError("Expected JSON object")
+
+        while True:
+            while True:
+                while pos < len(buffer) and (buffer[pos].isspace() or buffer[pos] == ","):
+                    pos += 1
+                if pos < len(buffer):
+                    break
+                if eof:
+                    return
+                buffer = ""
+                pos = 0
+                fill()
+
+            if buffer[pos] == "}":
+                return
+
+            while True:
+                try:
+                    doc_id, pos = decoder.raw_decode(buffer, pos)
+                    break
+                except json.JSONDecodeError:
+                    if eof:
+                        raise
+                    buffer = buffer[pos:]
+                    pos = 0
+                    fill()
+
+            while True:
+                while pos < len(buffer) and (buffer[pos].isspace() or buffer[pos] == ":"):
+                    pos += 1
+                if pos < len(buffer):
+                    break
+                if eof:
+                    raise ValueError("Unexpected end of JSON after key")
+                buffer = buffer[pos:]
+                pos = 0
+                fill()
+
+            while True:
+                try:
+                    tokens, pos = decoder.raw_decode(buffer, pos)
+                    break
+                except json.JSONDecodeError:
+                    if eof:
+                        raise
+                    buffer = buffer[pos:]
+                    pos = 0
+                    fill()
+
+            text = " ".join(tokens) if isinstance(tokens, list) else str(tokens)
+            yield doc_id, text
+
+            if pos > chunk_size:
+                buffer = buffer[pos:]
+                pos = 0
+
+
+def _load_processed_texts(path: str) -> Tuple[List[str], List[str]]:
+    doc_ids: List[str] = []
+    processed_docs: List[str] = []
+    for doc_id, text in _stream_processed_items(path):
+        doc_ids.append(doc_id)
+        processed_docs.append(text)
+    return doc_ids, processed_docs
 
 
 def _cache_paths(cache_prefix: str) -> tuple:
@@ -61,7 +161,7 @@ def get_engine(dataset_key: str, build_if_missing: bool = False) -> RankingEngin
 
         if not os.path.exists(data_file):
             raise FileNotFoundError(
-                f"{data_file} not found. Preprocess the dataset first: python main.py {key} 210000"
+                f"{data_file} not found. Preprocess the dataset first: python main.py {key}"
             )
 
         engine = RankingEngine()
@@ -72,9 +172,8 @@ def get_engine(dataset_key: str, build_if_missing: bool = False) -> RankingEngin
                     "Run once: python prepare_runtime.py"
                 )
             logger.info("Building index for %s (%s)...", key, data_file)
-            with open(data_file, encoding="utf-8") as f:
-                documents = json.load(f)
-            engine.fit(documents, fit_word2vec=False, fit_bert=False)
+            doc_ids, processed_docs = _load_processed_texts(data_file)
+            engine.fit_processed_texts(processed_docs, doc_ids, fit_word2vec=False, fit_bert=False)
             engine.save_cache(data_file, cache_prefix=cache_prefix)
 
         _engines[key] = engine

@@ -4,6 +4,8 @@ This is used at the final display step: ranking returns doc_ids, then the
 original unprocessed text is fetched from SQLite by doc_id.
 
 Usage:
+    python build_document_store.py        # all documents
+    python build_document_store.py 0      # all documents
     python build_document_store.py 210000
 """
 
@@ -16,7 +18,14 @@ from shared.datasets import DATASETS
 from shared.document_store import count_documents, init_document_store, upsert_documents
 
 
-def build_msmarco_document_store(limit: int = 210000, batch_size: int = 1000) -> int:
+def _parse_limit(value):
+    if value is None:
+        return None
+    parsed = int(value)
+    return None if parsed <= 0 else parsed
+
+
+def build_msmarco_document_store(limit=None, batch_size: int = 1000) -> int:
     cfg = DATASETS["msmarco"]
     db_path = cfg["document_db"]
     dataset = ir_datasets.load(cfg["ir_name"])
@@ -25,7 +34,7 @@ def build_msmarco_document_store(limit: int = 210000, batch_size: int = 1000) ->
     batch = []
     total = 0
     for i, doc in enumerate(dataset.docs_iter()):
-        if i >= limit:
+        if limit is not None and i >= limit:
             break
 
         raw_text = _extract_document_text(doc)
@@ -54,7 +63,7 @@ def build_msmarco_document_store(limit: int = 210000, batch_size: int = 1000) ->
 
 
 def main():
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 210000
+    limit = _parse_limit(sys.argv[1]) if len(sys.argv) > 1 else None
     build_msmarco_document_store(limit=limit)
 
 
