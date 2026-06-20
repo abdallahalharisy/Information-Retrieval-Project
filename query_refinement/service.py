@@ -1,39 +1,34 @@
-"""Query Refinement Service API."""
+"""Query refinement service."""
 
-from fastapi import APIRouter, HTTPException
+from typing import List
 
-from shared.schemas import (
-    HealthResponse,
-    RefineQueryRequest,
-    RefineQueryResponse,
-    SuggestRequest,
-    SuggestResponse,
-)
-from services.query_refinement.service import refine_query, suggest
-
-router = APIRouter(prefix="/query-refinement", tags=["Query Refinement"])
+from config import QUERY_REFINEMENT
+from preprocess import refine_query_text
+from shared.engine_registry import get_engine
 
 
-@router.get("/health", response_model=HealthResponse)
-def health():
-    return HealthResponse(service="query_refinement")
-
-
-@router.post("/refine", response_model=RefineQueryResponse)
-def refine(request: RefineQueryRequest):
-    result = refine_query(
-        request.query,
-        expand_synonyms=request.expand_synonyms,
-        do_spell_check=request.do_spell_check,
-        query_history=request.query_history,
+def refine_query(query: str, expand_synonyms: bool = True, do_spell_check: bool = True,
+                 query_history: List[str] = None) -> dict:
+    history = None
+    if query_history and QUERY_REFINEMENT.get("use_search_history", True):
+        history = [
+            refine_query_text(q, expand_synonyms=False, do_spell_check=False, max_synonyms_per_term=0)
+            for q in query_history
+        ]
+    refined = refine_query_text(
+        query,
+        expand_synonyms=expand_synonyms,
+        do_spell_check=do_spell_check,
+        max_synonyms_per_term=QUERY_REFINEMENT["max_synonyms_per_term"],
+        history_queries=history,
     )
-    return RefineQueryResponse(**result)
+    return {
+        "original": query,
+        "refined": refined if refined else query,
+        "tokens": (refined if refined else query).split(),
+    }
 
 
-@router.post("/suggest", response_model=SuggestResponse)
-def suggest_terms(request: SuggestRequest):
-    try:
-        suggestions = suggest(request.prefix, request.dataset, request.limit)
-        return SuggestResponse(prefix=request.prefix, suggestions=suggestions)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+def suggest(prefix: str, dataset: str, limit: int = 8) -> List[str]:
+    engine = get_engine(dataset)
+    return engine.suggest_queries(prefix, limit=limit)
